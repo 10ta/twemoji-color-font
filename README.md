@@ -1,3 +1,28 @@
+## 工作方式
+
+每天 UTC 03:17（北京时间 11:17）运行一次。workflow 拆成了两个 job：
+
+check：轻量级，几秒钟跑完。它用 git ls-remote 查询上游最新 tag，再检查你自己的仓库里是否已经有同名的 v17.0.3 tag。如果已经有，就直接结束，不安装依赖，也不构建，基本不消耗 Actions 分钟数。
+
+build-packages：只有 check 判断需要构建时才运行。定时触发时，构建完成后会自动创建 Release，tag 为 v{版本号}，说明里附上上游对应 release 的链接。
+
+版本号的来源顺序也统一了：
+
+手动触发并填写了版本号：使用填写的版本
+推送 tag（比如你手动推 v17.0.2）：使用 tag 里的版本号
+其他情况（push 到 main、PR、定时任务）：使用上游最新版本
+
+以上五种情况我都在本地模拟测试过，判断结果都符合预期。
+
+几点说明
+首次运行会立刻发布 v17.0.3。 你的仓库目前没有任何 tag，所以合并后的第一次定时运行会把当前的 17.0.3 构建并发布。之后要等上游发布新版本才会再次触发。
+不会重复构建。 用 GITHUB_TOKEN 创建的 tag 不会触发 push: tags 事件，所以自动发布不会再引起一次 tag 构建。
+想让自动发布的 tag 也被其他 workflow 捕获（比如以后加一个推送到 APT 源的 workflow），就需要改用 PAT 创建 release。目前不需要。
+GitHub 的限制： 公开仓库连续 60 天没有任何 commit，定时任务会被自动停用。GitHub 会发邮件提醒，到仓库的 Actions 页面重新启用即可。另外，定时任务只在默认分支（main）上运行，高峰时段可能会延迟几十分钟。
+想立即验证： 可以在 Actions 页面手动触发一次（Run workflow，版本号留空），流程与定时任务相同，只是 release 的 tag 名会是 build-main-xxxx 这样的格式。
+
+---
+
 # Twitter Color Emoji SVGinOT Font
 
 A color and B&W emoji SVG-OpenType / SVGinOT font built from the

@@ -9,13 +9,79 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'twemoji version to build (e.g. 17.0.3). Empty = latest upstream tag'
+        required: false
+        default: ''
+  schedule:
+    # Daily at 03:17 UTC: build & release automatically when upstream tags a new version.
+    - cron: '17 3 * * *'
 
 permissions:
   contents: write
 
+# Never run two builds of the same ref at once (e.g. schedule overlapping a manual run).
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-packages:
+  # Cheap job: decide which twemoji version to build and whether building is needed at all.
+  check:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      should_build: ${{ steps.resolve.outputs.should_build }}
+    steps:
+      - name: Resolve version and decide
+        id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          latest_upstream() {
+            git ls-remote --tags --refs --sort=-v:refname \
+                https://github.com/jdecked/twemoji.git 'v*' \
+              | sed -n 's|.*refs/tags/v\([0-9]\+\.[0-9]\+\.[0-9]\+\)$|\1|p' | head -n1
+          }
+
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="${INPUT_VERSION#v}"            # manual run with explicit version
+          elif [ "$REF_TYPE" = "tag" ]; then
+            VERSION="${REF_NAME#v}"                 # pushed tag v17.0.3 -> build 17.0.3
+          else
+            VERSION=$(latest_upstream)
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not determine twemoji version"
+            exit 1
+          fi
+
+          SHOULD_BUILD=true
+          if [ "$EVENT" = "schedule" ]; then
+            # Already released this version? Then there is nothing to do.
+            if git ls-remote --exit-code --tags "$REPO_URL" "refs/tags/v$VERSION" >/dev/null; then
+              echo "v$VERSION already released, skipping."
+              SHOULD_BUILD=false
+            else
+              echo "New upstream version v$VERSION found."
+            fi
+          fi
+
+          echo "Version: $VERSION, build: $SHOULD_BUILD"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+
+  build-packages:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -28,6 +94,8 @@ jobs:
             npm git make debhelper devscripts build-essential
           sudo npm install -g svgo
           git clone https://github.com/13rac1/scfbuild.git SCFBuild
+      - name: Sync SVG assets from upstream
+        run: make -s update
       - name: Build
         run: make -s fast
       - name: Collect metadata for PR
@@ -42,6 +110,9 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           BRANCH=${GITHUB_REF#refs/heads/}
           echo "ARTIFACT_NAME=$BRANCH-$COMMIT" >> $GITHUB_ENV
+      - name: Collect metadata for schedule
+        if: ${{ github.event_name == 'schedule' }}
+        run: echo "ARTIFACT_NAME=twemoji-$VERSION" >> $GITHUB_ENV
       - name: Collect metadata for workflow_dispatch
         if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
@@ -111,4 +182,16 @@ jobs:
             build/*-Linux-*.tar.gz
             build/*.zip
           generate_release_notes: true
-          
+
+      - name: Create Release (scheduled, new upstream version)
+        if: ${{ github.event_name == 'schedule' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Twemoji ${{ env.VERSION }}
+          body: |
+            Automated build of [jdecked/twemoji v${{ env.VERSION }}](https://github.com/jdecked/twemoji/releases/tag/v${{ env.VERSION }}).
+          files: |
+            build/*.deb
+            build/*-Linux-*.tar.gz
+            build/*.zip

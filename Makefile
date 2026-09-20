@@ -8,7 +8,27 @@ TMP := /dev/shm
 # Where to find scfbuild?
 SCFBUILD := SCFBuild/bin/scfbuild
 
-VERSION := 17.0.3
+# Upstream twemoji repo; the font version always follows its latest release tag.
+UPSTREAM_REPO := https://github.com/jdecked/twemoji.git
+
+# VERSION can be passed in (make VERSION=17.0.3, or the VERSION env var set by CI).
+# Otherwise query the latest vX.Y.Z tag from upstream (git ls-remote, no API rate limit).
+# `export` makes the value flow into recursive $(MAKE) calls so it is only resolved once.
+ifndef VERSION
+VERSION := $(shell git ls-remote --tags --refs --sort=-v:refname $(UPSTREAM_REPO) 'v*' \
+	| sed -n 's|.*refs/tags/v\([0-9]\+\.[0-9]\+\.[0-9]\+\)$$|\1|p' | head -n1)
+endif
+ifeq ($(strip $(VERSION)),)
+  $(error Could not determine VERSION from $(UPSTREAM_REPO); pass it explicitly: make VERSION=x.y.z)
+endif
+export VERSION
+
+# Debian packaging: revision and changelog identity for the auto-generated entry.
+DEB_REVISION ?= 1
+DEB_VERSION := $(VERSION)-$(DEB_REVISION)
+DEB_DISTRIBUTION ?= bionic
+export DEBFULLNAME ?= GitHub Actions
+export DEBEMAIL ?= actions@users.noreply.github.com
 FONT_PREFIX := TwitterColorEmoji-SVGinOT
 REGULAR_FONT := build/$(FONT_PREFIX).ttf
 REGULAR_PACKAGE := build/$(FONT_PREFIX)-$(VERSION)
@@ -48,7 +68,7 @@ SVG_COLOR_FILES := $(patsubst build/stage/%.svg, build/svg-color/%.svg, $(SVG_ST
 
 CPU_CORES := $(shell cat /proc/cpuinfo | grep processor | wc -l)
 
-.PHONY: all update package regular-package linux-package macos-package windows-package copy-extra clean
+.PHONY: all update print-version package regular-package linux-package macos-package windows-package copy-extra clean
 
 all: package
 
@@ -56,8 +76,19 @@ all: package
 fast:
 	$(MAKE) -j $(CPU_CORES)
 
+# Sync SVG assets from upstream at tag v$(VERSION).
+# Uses a shallow sparse clone so only assets/svg is downloaded.
 update:
-	cp ../twemoji/assets/svg/* assets/twemoji-svg/
+	rm -rf build/upstream
+	git -c advice.detachedHead=false clone --quiet --depth 1 --branch v$(VERSION) --filter=blob:none --sparse \
+		$(UPSTREAM_REPO) build/upstream
+	git -C build/upstream sparse-checkout set assets/svg
+	rm -f $(SVG_TWEMOJI)/*.svg
+	cp build/upstream/assets/svg/*.svg $(SVG_TWEMOJI)/
+	rm -rf build/upstream
+
+print-version:
+	@echo $(VERSION)
 
 # Create the operating system specific packages
 package: regular-package linux-package deb-package macos-package windows-package
@@ -85,7 +116,15 @@ deb-package: linux-package
 	rm -rf build/$(DEB_PACKAGE)-$(VERSION)
 	cp build/$(LINUX_PACKAGE).tar.gz build/$(DEB_PACKAGE)_$(VERSION).orig.tar.gz
 	cp -R build/$(LINUX_PACKAGE) build/$(DEB_PACKAGE)-$(VERSION)
-	cd build/$(DEB_PACKAGE)-$(VERSION); debuild -us -uc
+	# Prepend a changelog entry if debian/changelog lags behind $(VERSION).
+	# Only the copy in build/ is modified; linux/debian/changelog stays untouched.
+	cd build/$(DEB_PACKAGE)-$(VERSION) && \
+	if [ "$$(dpkg-parsechangelog -S Version)" != "$(DEB_VERSION)" ]; then \
+		dch --preserve --newversion "$(DEB_VERSION)" \
+			--distribution "$(DEB_DISTRIBUTION)" --force-distribution \
+			"Update to twemoji $(VERSION)."; \
+	fi
+	cd build/$(DEB_PACKAGE)-$(VERSION) && debuild --no-tgz-check -us -uc
 	# cd build/$(DEB_PACKAGE)-$(VERSION); debuild -S
 	# cd build dput ppa:eosrei/fonts $(DEB_PACKAGE)_$(VERSION)_source.changes
 
