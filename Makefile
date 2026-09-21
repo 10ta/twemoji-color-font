@@ -37,6 +37,14 @@ MACOS_PACKAGE := build/$(FONT_PREFIX)-MacOS-$(VERSION)
 LINUX_PACKAGE := $(FONT_PREFIX)-Linux-$(VERSION)
 DEB_PACKAGE := fonts-twemoji-svginot
 WINDOWS_TOOLS := windows
+
+# COLRv0 font (like Mozilla's Twemoji Mozilla): color in Chrome, Firefox and
+# native Windows/Linux/Android apps. Built with nanoemoji from the same SVGs.
+NANOEMOJI ?= nanoemoji
+COLR_FAMILY ?= Twemoji
+COLR_FONT := build/Twemoji-$(VERSION).ttf
+COLR_SRC := build/colr-src
+COLR_BUILD := build/colr-build
 WINDOWS_PACKAGE := build/$(FONT_PREFIX)-Win-$(VERSION)
 
 ifeq (, $(shell which inkscape))
@@ -68,7 +76,7 @@ SVG_COLOR_FILES := $(patsubst build/stage/%.svg, build/svg-color/%.svg, $(SVG_ST
 
 CPU_CORES := $(shell cat /proc/cpuinfo | grep processor | wc -l)
 
-.PHONY: all update print-version package regular-package linux-package macos-package windows-package copy-extra clean
+.PHONY: all update print-version colr-package package regular-package linux-package macos-package windows-package copy-extra clean
 
 all: package
 
@@ -91,7 +99,7 @@ print-version:
 	@echo $(VERSION)
 
 # Create the operating system specific packages
-package: regular-package linux-package deb-package macos-package windows-package
+package: regular-package linux-package deb-package macos-package windows-package colr-package
 
 regular-package: $(REGULAR_FONT)
 	rm -f $(REGULAR_PACKAGE).zip
@@ -127,6 +135,20 @@ deb-package: linux-package
 	cd build/$(DEB_PACKAGE)-$(VERSION) && debuild --no-tgz-check -us -uc
 	# cd build/$(DEB_PACKAGE)-$(VERSION); debuild -S
 	# cd build dput ppa:eosrei/fonts $(DEB_PACKAGE)_$(VERSION)_source.changes
+
+colr-package: $(COLR_FONT)
+
+$(COLR_FONT): $(wildcard $(SVG_TWEMOJI)/*.svg) tools/colr_sources.py | build
+	python3 tools/colr_sources.py $(SVG_TWEMOJI) $(COLR_SRC)
+	rm -rf $(COLR_BUILD)
+	$(NANOEMOJI) --color_format glyf_colr_0 \
+		--family "$(COLR_FAMILY)" \
+		--version_major $(word 1,$(subst ., ,$(VERSION))) \
+		--version_minor $(shell printf '%d%02d' $(word 2,$(subst ., ,$(VERSION))) $(word 3,$(subst ., ,$(VERSION)))) \
+		--build_dir $(COLR_BUILD) \
+		--output_file $(notdir $@) \
+		$(COLR_SRC)/*.svg
+	mv $(COLR_BUILD)/$(notdir $@) $@
 
 macos-package: $(MACOS_FONT)
 	rm -f $(MACOS_PACKAGE).zip

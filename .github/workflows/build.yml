@@ -96,8 +96,13 @@ jobs:
           sudo apt-get install -y \
             inkscape potrace imagemagick \
             python3-fontforge python3-fonttools python3-yaml \
-            npm git make debhelper devscripts build-essential
+            npm git make debhelper devscripts build-essential python3-venv
           sudo npm install -g svgo
+          # nanoemoji (COLRv0 font) in its own venv, so its newer fontTools
+          # does not interfere with the system fontTools used by scfbuild.
+          python3 -m venv "$RUNNER_TEMP/nanoemoji"
+          "$RUNNER_TEMP/nanoemoji/bin/pip" install --quiet nanoemoji
+          echo "NANOEMOJI=$RUNNER_TEMP/nanoemoji/bin/nanoemoji" >> "$GITHUB_ENV"
           git clone https://github.com/13rac1/scfbuild.git SCFBuild
       - name: Sync SVG assets from upstream
         run: make -s update
@@ -132,6 +137,7 @@ jobs:
             build/*.deb
             build/*-Linux-*.tar.gz
             build/*.zip
+            build/Twemoji-*.ttf
           compression-level: 0
       - name: Store regular package
         uses: actions/upload-artifact@v7
@@ -153,6 +159,12 @@ jobs:
         with:
           name: ${{env.ARTIFACT_NAME}}-deb
           path: build/*.deb
+          compression-level: 0
+      - name: Store COLR font
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{env.ARTIFACT_NAME}}-colr
+          path: build/Twemoji-*.ttf
           compression-level: 0
       - name: Store MacOS package
         uses: actions/upload-artifact@v7
@@ -180,6 +192,7 @@ jobs:
 
             | File | Platform |
             |---|---|
+            | `Twemoji-${{ env.VERSION }}.ttf` | **COLRv0, works everywhere incl. Chrome** (like Twemoji Mozilla) |
             | `TwitterColorEmoji-SVGinOT-${{ env.VERSION }}.zip` | Regular font |
             | `TwitterColorEmoji-SVGinOT-Linux-${{ env.VERSION }}.tar.gz` | Linux (install.sh) |
             | `fonts-twemoji-svginot_${{ env.VERSION }}-1_all.deb` | Debian / Ubuntu |
@@ -191,3 +204,4 @@ jobs:
             build/*.deb
             build/*-Linux-*.tar.gz
             build/*.zip
+            build/Twemoji-*.ttf
