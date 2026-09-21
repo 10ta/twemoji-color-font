@@ -179,6 +179,13 @@ jobs:
           path: build/*-Win-*.zip
           compression-level: 0
 
+      # Release ships the COLR font under a fixed, version-less name so that
+      # releases/latest/download/Twemoji.ttf always points at the newest build.
+      # Must run after the upload-artifact steps above, which still use Twemoji-*.ttf.
+      - name: Rename TTF to version-less name
+        if: ${{ github.event_name != 'pull_request' }}
+        run: mv "build/Twemoji-${VERSION}.ttf" build/Twemoji.ttf
+
       # One release per twemoji version (tag v<VERSION>), for every event except PRs.
       # Rebuilding the same version (push to main, manual run) updates that release's files.
       - name: Publish Release
@@ -192,7 +199,7 @@ jobs:
 
             | File | Platform |
             |---|---|
-            | `Twemoji-${{ env.VERSION }}.ttf` | **COLRv0, works everywhere incl. Chrome** (like Twemoji Mozilla) |
+            | `Twemoji.ttf` | **COLRv0, works everywhere incl. Chrome** (like Twemoji Mozilla) |
             | `TwitterColorEmoji-SVGinOT-${{ env.VERSION }}.zip` | Regular font |
             | `TwitterColorEmoji-SVGinOT-Linux-${{ env.VERSION }}.tar.gz` | Linux (install.sh) |
             | `fonts-twemoji-svginot_${{ env.VERSION }}-1_all.deb` | Debian / Ubuntu |
@@ -204,4 +211,4 @@ jobs:
             build/*.deb
             build/*-Linux-*.tar.gz
             build/*.zip
-            build/Twemoji-*.ttf
+            build/Twemoji.ttf
