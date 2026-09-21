@@ -46,6 +46,9 @@ COLR_FONT := build/Twemoji-$(VERSION).ttf
 COLR_SRC := build/colr-src
 COLR_BUILD := build/colr-build
 WINDOWS_PACKAGE := build/$(FONT_PREFIX)-Win-$(VERSION)
+# nanoemoji's ninja build calls `picosvg` and `ninja` by name, so the directory
+# holding nanoemoji (e.g. a venv's bin/) must be on PATH while it runs.
+NANOEMOJI_DIR = $(abspath $(dir $(shell command -v $(NANOEMOJI))))
 
 ifeq (, $(shell which inkscape))
   $(error "No inkscape in PATH, it is required for fallback b/w variant.")
@@ -141,8 +144,7 @@ colr-package: $(COLR_FONT)
 $(COLR_FONT): $(wildcard $(SVG_TWEMOJI)/*.svg) tools/colr_sources.py | build
 	python3 tools/colr_sources.py $(SVG_TWEMOJI) $(COLR_SRC)
 	rm -rf $(COLR_BUILD)
-	$(NANOEMOJI) --color_format glyf_colr_0 \
-		--family "$(COLR_FAMILY)" \
+	PATH="$(NANOEMOJI_DIR):$$PATH" $(NANOEMOJI) --color_format glyf_colr_0 \		--family "$(COLR_FAMILY)" \
 		--version_major $(word 1,$(subst ., ,$(VERSION))) \
 		--version_minor $(shell printf '%d%02d' $(word 2,$(subst ., ,$(VERSION))) $(word 3,$(subst ., ,$(VERSION)))) \
 		--build_dir $(COLR_BUILD) \
